@@ -1,0 +1,158 @@
+import os
+from flask import Flask, url_for, jsonify, request
+from flask.ext.sqlalchemy import SQLAlchemy
+from datetime import datetime
+from dateutil import parser as datetime_parser
+from dateutil.tz import tzutc
+
+basedir = os.path.abspath(os.path.dirname(__file__))
+db_path = os.path.join(basedir, '../data.sqlite')
+#print (basedir)
+
+app = Flask(__name__)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' +db_path
+
+db= SQLAlchemy(app)
+
+class ValidationError(ValueError):
+pass
+
+class Customer(db.Model):
+__tablename__ = 'customer'
+id = db.Column(db.Integer, primary_key=True)
+name = db.Column(db.String(64), index = True, nullable=False)
+orders = db.relationship('Order',backref='customer',lazy=True)
+
+def get_url(self):
+return url_for('get_customer', id=self.id, _external=True)
+
+def export_data(self):
+return {
+'self_url': self.get_url(),
+'orders_url': url_for('get_customers_orders', id=self.id, _external=True),
+'name': self.name
+}
+def import_data(self, data):
+try:
+self.name = data['name']
+except KeyError as e:
+raise ValidationError('Invalid customer: missing' + e.args[0])
+return self
+
+class Order(db.Model):
+__tablename__ = 'order'
+id = db.Column(db.Integer, primary_key=True)
+customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), index=True)
+date =db.Column(db.DateTime, default=datetime.now)
+
+def get_url(self):
+return url_for('get_order', id=self.id, _external=True)
+
+def export_data(self):
+return {
+'self_url': self.get_url(),
+'customer_url': self.customer.get_url(),
+'date': self.date
+
+}
+def import_data(self, data):
+try:
+self.date = datetime_parser.parse(data['date']).astimezone(tzutc()).replace(tzinfo=None)
+except KeyError as e:
+raise ValidationError('Invalid customer: missing' + e.args[0])
+return self
+def import_data_create(self, data):
+try:
+self.customer_id = data['customer_id']
+except KeyError as e:
+raise ValidationError('Invalid customer: missing' + e.args[0])
+return self
+
+
+
+##URLS orders
+@app.route('/orders/', methods=['GET'])
+def get_orders():
+return jsonify({'orders': [order.get_url() for order in
+Order.query.all()]})
+@app.route('/customers/<int:id>/orders/', methods=['GET'])
+def get_customers_orders(id):
+customer = Customer.query.get_or_404(id)
+#print(customer.order.all())
+#return ({})
+return jsonify({'Orders': [order.get_url() for order in customer.order.all()]})
+"""
+if __name__ == '__main__':
+db.create_all()
+app.run(debug=True)
+"""
+@app.route('/orders/<int:id>', methods=['GET'])
+def get_order(id):
+return jsonify(Order.query.get_or_404(id).export_data())
+
+@app.route('/customers/<int:id>/orders/', methods=['POST'])
+def nuevo_orders(id):
+customer = Customer.query.get_or_404(id)
+order = Order(customer = customer)
+order.import_data(request.json)
+db.session.add(order)
+db.session.commit()
+return jsonify({}), 201, {'Location': order.get_url()}
+
+@app.route('/orders/<int:id>', methods=['PUT'])
+def edit_orders(id):
+order = Order.query.get_or_404(id)
+order.import_data(request.json)
+db.session.add(order)
+db.session.commit()
+return jsonify({})
+
+@app.route('/orders/<int:id>', methods=['DELETE'])
+def delete_orders(id):
+order = Order.query.get_or_404(id)
+db.session.delete(order)
+db.session.commit()
+return jsonify({})
+
+
+#URLS customers
+@app.route('/customers/', methods=['GET'])
+def get_customers():
+return jsonify({'customers': [customer.get_url() for customer in
+Customer.query.all()]})
+"""
+if __name__ == '__main__':
+db.create_all()
+app.run(debug=True)
+"""
+@app.route('/customers/<int:id>', methods=['GET'])
+def get_customer(id):
+return jsonify(Customer.query.get_or_404(id).export_data())
+
+@app.route('/customers/', methods=['POST'])
+def nuevo_customer():
+customer = Customer()
+customer.import_data(request.json)
+db.session.add(customer)
+db.session.commit()
+return jsonify({}), 201, {'Location': customer.get_url()}
+
+@app.route('/customers/<int:id>', methods=['PUT'])
+def edit_customer(id):
+customer = Customer.query.get_or_404(id)
+customer.import_data(request.json)
+db.session.add(customer)
+db.session.commit()
+return jsonify({})
+
+@app.route('/customers/<int:id>', methods=['DELETE'])
+def delete_customer(id):
+customer = Customer.query.get_or_404(id)
+db.session.delete(customer)
+db.session.commit()
+return jsonify({})
+
+
+if __name__ == '__main__':
+db.create_all()
+app.run(debug=True)
